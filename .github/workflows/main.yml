@@ -1,0 +1,51 @@
+# Nama file: .github/workflows/preprocessing-workflow.yml
+
+name: Run Preprocessing on Push
+
+on:
+  push:
+    branches:
+      - main     # Ganti ini jika branch utama Anda 'master'
+      - master
+  workflow_dispatch: # Agar bisa dijalankan manual
+
+jobs:
+  preprocess:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: 1. Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: 2. Setup Conda Environment (Python 3.12.7)
+      # Menggunakan action khusus untuk Conda
+      uses: conda-actions/setup-miniconda@v3
+      with:
+        python-version: "3.12.7"      # Sesuai permintaan
+        auto-update-conda: true     # Update conda ke versi terbaru
+        activate-environment: "preprocessing-env" # Buat & aktifkan env baru
+
+    - name: 3. Install Dependencies (via Conda)
+      # 'shell: bash -l {0}' SANGAT PENTING agar bisa 'conda run'
+      shell: bash -l {0}
+      run: |
+        echo "Menginstal dependensi ke env 'preprocessing-env'..."
+        # Kita instal dari channel 'conda-forge' yang stabil
+        # Perhatikan: kita hanya instal yang kita BUTUHKAN
+        conda install --yes -c conda-forge pandas scikit-learn numpy
+
+    - name: 4. Run Preprocessing Script
+      shell: bash -l {0} # HARUS pakai ini lagi
+      run: |
+        echo "--- Menjalankan skrip Python ---"
+        # Menjalankan skrip V2 kita (yang anti-data-leakage)
+        python preprocessing/automate_Nama-Anda_v2.py
+        echo "--- Skrip Selesai ---"
+
+    - name: 5. Upload Preprocessed Dataset
+      # Ini akan menyimpan hasilnya sebagai "Artifact"
+      uses: actions/upload-artifact@v4
+      with:
+        name: processed-heart-dataset
+        path: preprocessing/namadataset_preprocessing/heart_preprocessed.csv
+        retention-days: 7 # Simpan artefak selama 7 hari
