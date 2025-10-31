@@ -10,8 +10,8 @@ import sys
 # ======================
 # 1. Setup Konstanta & Path
 # ======================
-RAW_DATA_PATH = Path("namadataset_raw/heart.csv") 
-OUTPUT_FOLDER = Path("preprocessing/namadataset_preprocessing")
+RAW_DATA_PATH = Path("heart_raw/heart.csv") 
+OUTPUT_FOLDER = Path("preprocessing/heart_preprocessing")
 OUTPUT_FILE = OUTPUT_FOLDER / "heart_preprocessed.csv"
 
 # (Konstanta rename & daftar kolom a)
