@@ -1,20 +1,20 @@
+
+
 import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
-from pathlib import Path 
+from sklearn.model_selection import train_test_split
+from pathlib import Path
 import sys
 
 # ======================
 # 1. Setup Konstanta & Path
 # ======================
-# Sdata mentah ada di folder 'heart_raw'
-RAW_DATA_PATH = Path("heart_raw/heart.csv") 
-
-#  output disimpan di 'heart_preprocessing'
-OUTPUT_FOLDER = Path("preprocessing/heart_preprocessing")
+RAW_DATA_PATH = Path("namadataset_raw/heart.csv") 
+OUTPUT_FOLDER = Path("preprocessing/namadataset_preprocessing")
 OUTPUT_FILE = OUTPUT_FOLDER / "heart_preprocessed.csv"
 
-# Konstanta rename (diambil dari notebook)
+# (Konstanta rename & daftar kolom a)
 COLUMN_RENAME_MAP = {
     "age": "Age", "sex": "Sex", "cp": "ChestPain",
     "trestbps": "RestingBloodPressure", "chol": "Cholesterol",
@@ -23,8 +23,6 @@ COLUMN_RENAME_MAP = {
     "oldpeak": "OldPeak", "slope": "STSlope",
     "ca": "nMajorVessels", "thal": "Thalium", "target": "Status"
 }
-
-# Konstanta kolom (diambil dari notebook)
 CATEGORICAL_COLS = [
     'Sex', 'ChestPain', 'FastingBloodSugar', 'RestingECG',
     'ExcerciseAngina', 'STSlope', 'Thalium'
@@ -43,29 +41,25 @@ COLS_TO_CAP = [
 
 def run_preprocessing():
     """
-    Fungsi utama untuk memuat, memproses, dan menyimpan dataset.
+    Memuat data, membersihkan (duplikat, outlier), lalu
+    membagi data (split) SEBELUM menerapkan scaling/encoding
+    untuk mencegah data leakage.
     """
-    print("Memulai skrip preprocessing otomatis...")
+    print("Memulai skrip preprocessing otomatis (v2)...")
 
-    # --- 1. Load Data ---
+    # --- 1. Load, Rename, Drop Duplikat, Cap Outlier ---
     try:
         df_raw = pd.read_csv(RAW_DATA_PATH)
-        print(f"Data mentah {RAW_DATA_PATH} berhasil dimuat.")
     except FileNotFoundError:
         print(f"ERROR: File data mentah tidak ditemukan di {RAW_DATA_PATH}")
-        print("Pastikan file 'heart.csv' ada di folder 'namadataset_raw/'")
-        sys.exit(1) # Keluar dari skrip jika file tidak ada
+        sys.exit(1)
 
-    # --- 2. Rename Kolom ---
     df_model = df_raw.rename(columns=COLUMN_RENAME_MAP)
-
-    # --- 3. Hapus Duplikat ---
+    
     len_before = len(df_model)
     df_model = df_model.drop_duplicates()
-    len_after = len(df_model)
-    print(f"Menghapus {len_before - len_after} baris duplikat.")
+    print(f"Menghapus {len_before - len(df_model)} baris duplikat.")
 
-    # --- 4. Penanganan Outlier ---
     print("Menangani outlier dengan Capping IQR...")
     for col in COLS_TO_CAP:
         if col in df_model.columns:
@@ -75,41 +69,56 @@ def run_preprocessing():
             batas_bawah = Q1 - (1.5 * IQR)
             batas_atas = Q3 + (1.5 * IQR)
             df_model[col] = df_model[col].clip(lower=batas_bawah, upper=batas_atas)
-    print("Penanganan outlier selesai.")
-
-    # --- 5. Pisahkan Fitur (X) dan Target (y) ---
-    # Dijalankan SETELAH data bersih (duplikat & outlier)
+    
+    # --- 2. Pisahkan Fitur (X) dan Target (y) ---
     X = df_model.drop(columns=['Status'])
-    y = df_model['Status'].reset_index(drop=True) 
+    y = df_model['Status']
 
-    # --- 6. One-Hot Encoding Fitur Kategorikal ---
-    print("Melakukan One-Hot Encoding...")
-    X_cat = pd.get_dummies(
+    # --- 3. Train-Test Split (SEBELUM PREPROCESSING) ---
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.3, random_state=42, stratify=y
+    )
+    print("Data berhasil di-split (70% train, 30% test).")
+
+    # --- 4. One-Hot Encoding ---
+    # (pd.get_dummies tidak rawan leakage, tapi lebih baik konsisten)
+    # Kita 'fit' di semua data X agar kolomnya konsisten
+    X_cat_full = pd.get_dummies(
         X[CATEGORICAL_COLS].astype(str),
         columns=CATEGORICAL_COLS,
         drop_first=True
-    ).reset_index(drop=True)
+    )
+    # Lalu pisahkan lagi berdasarkan index
+    X_train_cat = X_cat_full.loc[X_train.index]
+    X_test_cat = X_cat_full.loc[X_test.index]
 
-    # --- 7. Scaling Fitur Numerik ---
-    print("Melakukan Standard Scaling...")
+    # --- 5. Scaling Fitur Numerik (CARA AMAN) ---
     scaler = StandardScaler()
-    X_num_scaled = pd.DataFrame(
-        scaler.fit_transform(X[NUMERIC_COLS]),
-        columns=[f"{col}_scaled" for col in NUMERIC_COLS]
-    ).reset_index(drop=True)
-
-    # --- 8. Gabungkan Kembali ---
-    print("Menggabungkan semua fitur yang sudah diproses...")
-    X_processed = pd.concat([X_num_scaled, X_cat], axis=1)
     
-    # Gabungkan dengan target ke satu dataframe final
-    final_df = pd.concat([X_processed, y], axis=1)
+    # 'fit' HANYA di X_train
+    X_train_num_scaled = scaler.fit_transform(X_train[NUMERIC_COLS])
+    # 'transform' di X_test (pakai mean/std dari X_train)
+    X_test_num_scaled = scaler.transform(X_test[NUMERIC_COLS])
 
-    # --- 9. Simpan Dataset ---
+    # Konversi kembali ke DataFrame
+    num_scaled_cols = [f"{col}_scaled" for col in NUMERIC_COLS]
+    X_train_num_df = pd.DataFrame(X_train_num_scaled, columns=num_scaled_cols, index=X_train.index)
+    X_test_num_df = pd.DataFrame(X_test_num_scaled, columns=num_scaled_cols, index=X_test.index)
+    
+    # --- 6. Gabungkan Kembali ---
+    X_train_processed = pd.concat([X_train_num_df, X_train_cat], axis=1)
+    X_test_processed = pd.concat([X_test_num_df, X_test_cat], axis=1)
+
+    # Gabungkan dengan target
+    train_final_df = pd.concat([X_train_processed, y_train.reset_index(drop=True)], axis=1)
+    test_final_df = pd.concat([X_test_processed, y_test.reset_index(drop=True)], axis=1)
+    
+    # Gabungkan semua data untuk disimpan (sesuai permintaan tugas)
+    final_df = pd.concat([train_final_df, test_final_df]).reset_index(drop=True)
+    
+    # --- 7. Simpan Dataset ---
     print("Menyimpan dataset yang sudah diproses...")
-    # Pastikan folder output ada
     OUTPUT_FOLDER.mkdir(parents=True, exist_ok=True)
-    
     final_df.to_csv(OUTPUT_FILE, index=False)
     print(f"\nSukses! Data telah diproses dan disimpan di:\n{OUTPUT_FILE}")
 
@@ -117,5 +126,4 @@ def run_preprocessing():
 # 3. Eksekusi Skrip
 # ======================
 if __name__ == "__main__":
-    # Ini membuat skrip bisa dijalankan langsung dari terminal/Actions
     run_preprocessing()
